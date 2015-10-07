@@ -133,6 +133,19 @@ class CRM_Contribute_BAO_Contribution extends CRM_Contribute_DAO_Contribution {
       }
     }
 
+    //if contribution is created with cancelled or refunded status, add credit note id
+    if (!empty($params['contribution_status_id'])) {
+      $contributionStatus = CRM_Contribute_PseudoConstant::contributionStatus(NULL, 'name');
+
+      if (($params['contribution_status_id'] == array_search('Refunded', $contributionStatus)
+          || $params['contribution_status_id'] == array_search('Cancelled', $contributionStatus))
+      ) {
+        if (empty($params['creditnote_id']) || $params['creditnote_id'] == "null") {
+          $params['creditnote_id'] = self::createCreditNoteId();
+        }
+      }
+    }
+
     //set defaults in create mode
     if (!$contributionID) {
       CRM_Core_DAO::setCreateDefaults($params, self::getDefaults());
@@ -386,6 +399,19 @@ class CRM_Contribute_BAO_Contribution extends CRM_Contribute_DAO_Contribution {
     foreach ($dateFields as $df) {
       if (isset($params[$df])) {
         $params[$df] = CRM_Utils_Date::isoToMysql($params[$df]);
+      }
+    }
+
+    //if contribution is created with cancelled or refunded status, add credit note id
+    if (!empty($params['contribution_status_id'])) {
+      $contributionStatus = CRM_Contribute_PseudoConstant::contributionStatus(NULL, 'name');
+
+      if (($params['contribution_status_id'] == array_search('Refunded', $contributionStatus)
+          || $params['contribution_status_id'] == array_search('Cancelled', $contributionStatus))
+      ) {
+        if (empty($params['creditnote_id']) || $params['creditnote_id'] == "null") {
+          $params['creditnote_id'] = self::createCreditNoteId();
+        }
       }
     }
 
@@ -792,15 +818,24 @@ class CRM_Contribute_BAO_Contribution extends CRM_Contribute_DAO_Contribution {
     if ($endDate) {
       $where[] = "receive_date <= '" . CRM_Utils_Type::escape($endDate, 'Timestamp') . "'";
     }
+    CRM_Financial_BAO_FinancialType::getAvailableFinancialTypes($financialTypes);
+    if ($financialTypes) {
+      $where[] = "c.financial_type_id IN (" . implode(',', array_keys($financialTypes)) . ")";
+      $where[] = "i.financial_type_id IN (" . implode(',', array_keys($financialTypes)) . ")";
+    }
+    else {
+      $where[] = "c.financial_type_id IN (0)";
+    }
 
     $whereCond = implode(' AND ', $where);
 
     $query = "
     SELECT  sum( total_amount ) as total_amount,
-            count( civicrm_contribution.id ) as total_count,
+            count( c.id ) as total_count,
             currency
-      FROM  civicrm_contribution
-INNER JOIN  civicrm_contact contact ON ( contact.id = civicrm_contribution.contact_id )
+      FROM  civicrm_contribution c
+INNER JOIN  civicrm_contact contact ON ( contact.id = c.contact_id )
+LEFT JOIN  civicrm_line_item i ON ( i.contribution_id = c.id AND i.entity_table = 'civicrm_contribution' )
      WHERE  $whereCond
        AND  ( is_test = 0 OR is_test IS NULL )
        AND  contact.is_deleted = 0
@@ -1186,18 +1221,26 @@ WHERE  civicrm_contribution.contact_id = civicrm_contact.id
     }
     $startDate = "$year$monthDay";
     $endDate = "$nextYear$monthDay";
-
+    CRM_Financial_BAO_FinancialType::getAvailableFinancialTypes($financialTypes);
+    $additionalWhere = " AND b.financial_type_id IN (0)";
+    $liWhere = " AND i.financial_type_id IN (0)";
+    if (!empty($financialTypes)) {
+      $additionalWhere = " AND b.financial_type_id IN (" . implode(',', array_keys($financialTypes)) . ") AND i.id IS NULL";
+      $liWhere = " AND i.financial_type_id NOT IN (" . implode(',', array_keys($financialTypes)) . ")";
+    }
     $query = "
       SELECT count(*) as count,
              sum(total_amount) as amount,
              avg(total_amount) as average,
              currency
         FROM civicrm_contribution b
+        LEFT JOIN civicrm_line_item i ON i.contribution_id = b.id AND i.entity_table = 'civicrm_contribution' $liWhere
        WHERE b.contact_id IN ( $contactIDs )
          AND b.contribution_status_id = 1
          AND b.is_test = 0
          AND b.receive_date >= $startDate
          AND b.receive_date <  $endDate
+      $additionalWhere 
       GROUP BY currency
       ";
     $dao = CRM_Core_DAO::executeQuery($query, CRM_Core_DAO::$_nullArray);
@@ -1888,11 +1931,20 @@ LEFT JOIN  civicrm_contribution contribution ON ( componentPayment.contribution_
     if (!$contactId) {
       return 0;
     }
-
+    CRM_Financial_BAO_FinancialType::getAvailableFinancialTypes($financialTypes);
+    $additionalWhere = " AND contribution.financial_type_id IN (0)";
+    $liWhere = " AND i.financial_type_id IN (0)";
+    if (!empty($financialTypes)) {
+      $additionalWhere = " AND contribution.financial_type_id IN (" . implode(',', array_keys($financialTypes)) . ")";
+      $liWhere = " AND i.financial_type_id NOT IN (" . implode(',', array_keys($financialTypes)) . ")";
+    }
     $contactContributionsSQL = "
       SELECT contribution.id AS id
       FROM civicrm_contribution contribution
-      WHERE contribution.is_test = 0 AND contribution.contact_id = {$contactId} ";
+      LEFT JOIN civicrm_line_item i ON i.contribution_id = contribution.id AND i.entity_table = 'civicrm_contribution' $liWhere 
+      WHERE contribution.is_test = 0 AND contribution.contact_id = {$contactId} 
+      $additionalWhere 
+      AND i.id IS NULL";
 
     $contactSoftCreditContributionsSQL = "
       SELECT contribution.id
@@ -3191,6 +3243,10 @@ WHERE  contribution_id = %1 ";
           || $params['contribution']->contribution_status_id == array_search('Cancelled', $contributionStatus))
       ) {
         $params['trxnParams']['total_amount'] = -$params['total_amount'];
+        if (empty($params['contribution']->creditnote_id) || $params['contribution']->creditnote_id == "null") {
+          $creditNoteId = self::createCreditNoteId();
+          CRM_Core_DAO::setFieldValue('CRM_Contribute_DAO_Contribution', $params['contribution']->id, 'creditnote_id', $creditNoteId);
+        }
       }
       elseif (($params['prevContribution']->contribution_status_id == array_search('Pending', $contributionStatus)
           && $params['prevContribution']->is_pay_later) || $params['prevContribution']->contribution_status_id == array_search('In Progress', $contributionStatus)
@@ -3202,6 +3258,10 @@ WHERE  contribution_id = %1 ";
         if ($params['contribution']->contribution_status_id == array_search('Cancelled', $contributionStatus)) {
           $params['trxnParams']['to_financial_account_id'] = $arAccountId;
           $params['trxnParams']['total_amount'] = -$params['total_amount'];
+          if (is_null($params['contribution']->creditnote_id) || $params['contribution']->creditnote_id == "null") {
+            $creditNoteId = self::createCreditNoteId();
+            CRM_Core_DAO::setFieldValue('CRM_Contribute_DAO_Contribution', $params['contribution']->id, 'creditnote_id', $creditNoteId);
+          }
         }
         else {
           $params['trxnParams']['from_financial_account_id'] = $arAccountId;
@@ -4097,6 +4157,7 @@ WHERE con.id = {$contributionId}
 
     $contributionParams = array_merge(array(
       'contribution_status_id' => 'Completed',
+      'financial_type_id' => $contribution->financial_type_id,
     ), array_intersect_key($input, array_fill_keys($inputContributionWhiteList, 1)
     ));
 
@@ -4363,6 +4424,30 @@ LIMIT 1;";
       }
     }
     return $contribution->composeMessageArray($input, $ids, $values, $recur, $returnMessageText);
+  }
+
+  /**
+   * Generate credit note id with next avaible number
+   *
+   * @return string
+   *   Credit Note Id.
+   */
+  public static function createCreditNoteId() {
+    $prefixValue = CRM_Core_BAO_Setting::getItem(CRM_Core_BAO_Setting::CONTRIBUTE_PREFERENCES_NAME, 'contribution_invoice_settings');
+
+    $creditNoteNum = CRM_Core_DAO::singleValueQuery("SELECT count(creditnote_id) as creditnote_number FROM civicrm_contribution");
+    $creditNoteId = NULL;
+
+    do {
+      $creditNoteNum++;
+      $creditNoteId = CRM_Utils_Array::value('credit_notes_prefix', $prefixValue) . "" . $creditNoteNum;
+      $result = civicrm_api3('Contribution', 'getcount', array(
+        'sequential' => 1,
+        'creditnote_id' => $creditNoteId,
+      ));
+    } while ($result > 0);
+
+    return $creditNoteId;
   }
 
 }

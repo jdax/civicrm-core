@@ -493,6 +493,15 @@ class CRM_Contact_BAO_Query {
 
     $this->selectClause();
     $this->_whereClause = $this->whereClause();
+    if (array_key_exists('civicrm_contribution', $this->_whereTables)) {
+      $component = 'contribution';
+    }
+    if (array_key_exists('civicrm_membership', $this->_whereTables)) {
+      $component = 'membership';
+    }
+    if (isset($component)) {
+      CRM_Financial_BAO_FinancialType::buildPermissionedClause($this->_whereClause, $component);
+    }
 
     $this->_fromClause = self::fromClause($this->_tables, NULL, NULL, $this->_primaryLocation, $this->_mode);
     $this->_simpleFromClause = self::fromClause($this->_whereTables, NULL, NULL, $this->_primaryLocation, $this->_mode);
@@ -1354,10 +1363,17 @@ class CRM_Contact_BAO_Query {
 
           if (!isset($group->saved_search_id)) {
             $tbName = "`civicrm_group_contact-{$groupId}`";
-            $this->_select['group_contact_id'] = "$tbName.id as group_contact_id";
-            $this->_element['group_contact_id'] = 1;
-            $this->_select['status'] = "$tbName.status as status";
-            $this->_element['status'] = 1;
+            // CRM-17254 don't retrieve extra fields if contact_id is specifically requested
+            // as this will add load to an intentionally light query.
+            // ideally this code would be removed as it appears to be to support CRM-1203
+            // and passing in the required returnProperties from the url would
+            // make more sense that globally applying the requirements of one form.
+            if (($this->_returnProperties != array('contact_id'))) {
+              $this->_select['group_contact_id'] = "$tbName.id as group_contact_id";
+              $this->_element['group_contact_id'] = 1;
+              $this->_select['status'] = "$tbName.status as status";
+              $this->_element['status'] = 1;
+            }
           }
         }
         $this->_useGroupBy = TRUE;
@@ -1485,6 +1501,9 @@ class CRM_Contact_BAO_Query {
     }
 
     foreach ($formValues as $id => $values) {
+
+      self::legacyConvertFormValues($id, $values);
+
       if (self::isAlreadyProcessedForQueryFormat($values)) {
         $params[] = $values;
         continue;
@@ -1560,6 +1579,26 @@ class CRM_Contact_BAO_Query {
       }
     }
     return $params;
+  }
+
+  /**
+   * Function to support legacy format for groups and tags.
+   *
+   * @param string $id
+   * @param array|int $values
+   *
+   */
+  public static function legacyConvertFormValues($id, &$values) {
+    if (in_array($id, array('group', 'tag')) && is_array($values)) {
+      // prior to 4.7, formValues for some attributes (e.g. group, tag) are stored in array(id1 => 1, id2 => 1),
+      // as per the recent Search fixes $values need to be in standard array(id1, id2) format
+      $ids = array_keys($values, 1);
+      if (count($ids) > 1 ||
+        (count($ids) == 1 && (key($values) > 1 || (key($values) == 1 && $values[1] == 1))) // handle (0 => 4), (1 => 1)
+      ) {
+        $values = $ids;
+      }
+    }
   }
 
   /**
@@ -4755,6 +4794,16 @@ SELECT COUNT( conts.total_amount ) as total_count,
     if ($context == 'search') {
       $where .= " AND contact_a.is_deleted = 0 ";
     }
+    CRM_Financial_BAO_FinancialType::getAvailableFinancialTypes($financialTypes);
+    if (!empty($financialTypes)) {
+      $where .= " AND civicrm_contribution.financial_type_id IN (" . implode(',', array_keys($financialTypes)) . ") AND li.id IS NULL";
+      $from .= " LEFT JOIN civicrm_line_item li
+                      ON civicrm_contribution.id = li.contribution_id AND
+                         li.entity_table = 'civicrm_contribution' AND li.financial_type_id NOT IN (" . implode(',', array_keys($financialTypes)) . ") ";
+    }
+    else {
+      $where .= " AND civicrm_contribution.financial_type_id IN (0)";
+    }
 
     // make sure contribution is completed - CRM-4989
     $completedWhere = $where . " AND civicrm_contribution.contribution_status_id = 1 ";
@@ -4764,7 +4813,6 @@ SELECT COUNT( conts.total_amount ) as total_count,
     $summary['total']['count'] = $summary['total']['amount'] = $summary['total']['avg'] = "n/a";
     $innerQuery = "SELECT civicrm_contribution.total_amount, COUNT(civicrm_contribution.total_amount) as civicrm_contribution_total_amount_count,
       civicrm_contribution.currency $from $completedWhere";
-
     $query = "$select FROM (
       $innerQuery GROUP BY civicrm_contribution.id
     ) as conts

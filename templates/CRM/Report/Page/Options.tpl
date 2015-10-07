@@ -74,7 +74,11 @@
 
     {if $action ne 1 and $action ne 2}
       <div class="action-link">
+<<<<<<< HEAD
         <a href="{$newReport}"  id="new"|cat:$GName class="button"><span><i class="crm-i fa-plus-circle"></i> {ts 1=$GName}Register New %1{/ts}</span></a>
+=======
+        <a href="{$newReport}"  id="new"|cat:$GName class="button"><span><div class="icon ui-icon-circle-plus"></div> {ts 1=$GName}Register New %1{/ts}</span></a>
+>>>>>>> d4e756e0e56c4842a5266eaa4c7f26cb5a0facae
       </div>
     {/if}
   </div>
