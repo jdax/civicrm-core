@@ -75,10 +75,14 @@
     {if $action ne 1 and $action ne 2}
       <div class="action-link">
 <<<<<<< HEAD
+<<<<<<< HEAD
         <a href="{$newReport}"  id="new"|cat:$GName class="button"><span><i class="crm-i fa-plus-circle"></i> {ts 1=$GName}Register New %1{/ts}</span></a>
 =======
         <a href="{$newReport}"  id="new"|cat:$GName class="button"><span><div class="icon ui-icon-circle-plus"></div> {ts 1=$GName}Register New %1{/ts}</span></a>
 >>>>>>> d4e756e0e56c4842a5266eaa4c7f26cb5a0facae
+=======
+        <a href="{$newReport}"  id="new"|cat:$GName class="button"><span><i class="crm-i fa-plus-circle"></i> {ts 1=$GName}Register New %1{/ts}</span></a>
+>>>>>>> fcc3f6e67ddb3667a4ade7625b1ca675e8a0d42e
       </div>
     {/if}
   </div>

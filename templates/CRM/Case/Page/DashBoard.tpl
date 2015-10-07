@@ -36,7 +36,11 @@
     {if $newClient and $allowToAddNewCase}
       <a href="{$newCaseURL}" class="button"><span><i class="crm-i fa-plus-circle"></i> {ts}Add Case{/ts}</span></a>
     {/if}
+<<<<<<< HEAD
     <a class="button no-popup" name="find_my_cases" href="{crmURL p="civicrm/case/search" q="reset=1&case_owner=2&force=1"}"><span><i class="crm-i fa-plus-search"></i> {ts}Find My Cases{/ts}</span></a>
+=======
+    <a class="button no-popup" name="find_my_cases" href="{crmURL p="civicrm/case/search" q="reset=1&case_owner=2&force=1"}"><span><i class="crm-i fa-search"></i> {ts}Find My Cases{/ts}</span></a>
+>>>>>>> fcc3f6e67ddb3667a4ade7625b1ca675e8a0d42e
 
     <div class="crm-case-dashboard-switch-view-buttons">
         {if $myCases}
