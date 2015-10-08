@@ -157,7 +157,7 @@ class CRM_Utils_Check_Message {
   }
 
   public function setVisible($isVisible) {
-    $this->isVisible = $isVisible;
+    $this->isVisible = $isVisible ? 1 : 0;
   }
 
 }
